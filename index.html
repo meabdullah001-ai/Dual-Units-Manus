@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dual Units · Manager.io Extension</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div id="app" class="max-w-4xl mx-auto p-4">
+        <!-- Header -->
+        <div class="flex items-center justify-between border-bottom mb-4 bg-white p-4 rounded shadow-sm">
+            <div class="flex items-center space-x-2">
+                <span class="text-2xl">⚖</span>
+                <h1 class="text-xl font-bold">Dual Units</h1>
+            </div>
+            <div id="connection-status" class="text-sm text-yellow-600 flex items-center">
+                <span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+                Connecting to Manager.io...
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex space-x-4 mb-6 border-b">
+            <button onclick="showTab('calculator')" id="tab-calculator" class="pb-2 px-4 tab-active font-medium">⟳ Calculator</button>
+            <button onclick="showTab('items')" id="tab-items" class="pb-2 px-4 font-medium text-gray-500 hover:text-gray-700">📦 Items</button>
+            <button onclick="showTab('settings')" id="tab-settings" class="pb-2 px-4 font-medium text-gray-500 hover:text-gray-700">⚙ Settings</button>
+        </div>
+
+        <!-- Calculator Tab -->
+        <div id="view-calculator" class="tab-view">
+            <div class="bg-white p-6 rounded-lg shadow-sm border">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Select Inventory Item</label>
+                <select id="calc-item-select" class="w-full p-2 border rounded mb-6" onchange="onItemSelect()">
+                    <option value="">— Select an inventory item —</option>
+                </select>
+
+                <div id="calc-controls" class="hidden space-y-6">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label id="label-unit1" class="block text-xs font-bold text-gray-500 uppercase mb-1">Unit 1</label>
+                            <input type="number" id="input-unit1" class="w-full p-3 text-lg border rounded" placeholder="0.00" oninput="convert(1)">
+                            <div id="price-unit1" class="text-sm text-gray-500 mt-1">Price: 0.00</div>
+                        </div>
+                        <div class="flex items-center justify-center pt-6">
+                            <span class="text-2xl text-gray-400">⇌</span>
+                        </div>
+                        <div>
+                            <label id="label-unit2" class="block text-xs font-bold text-gray-500 uppercase mb-1">Unit 2</label>
+                            <input type="number" id="input-unit2" class="w-full p-3 text-lg border rounded" placeholder="0.00" oninput="convert(2)">
+                            <div id="price-unit2" class="text-sm text-gray-500 mt-1">Price: 0.00</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-blue-50 p-4 rounded border border-blue-100">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <div class="text-sm text-blue-700 font-medium">Total Amount</div>
+                                <div id="calc-total" class="text-2xl font-bold text-blue-900">0.00</div>
+                            </div>
+                            <button onclick="insertToInvoice()" class="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 transition shadow-sm">
+                                Insert into Invoice
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="calc-placeholder" class="text-center py-12 text-gray-400">
+                    <span class="text-4xl block mb-2">⚖</span>
+                    Select an item to start converting between units.
+                </div>
+            </div>
+        </div>
+
+        <!-- Items Tab -->
+        <div id="view-items" class="tab-view hidden">
+            <div class="bg-white rounded-lg shadow-sm border overflow-hidden">
+                <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                    <h2 class="font-bold">Inventory Items</h2>
+                    <input type="text" id="item-search" placeholder="Search items..." class="p-1 border rounded text-sm" oninput="renderItems()">
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+                            <tr>
+                                <th class="px-4 py-3">Item Name</th>
+                                <th class="px-4 py-3">Code</th>
+                                <th class="px-4 py-3">Dual Unit Status</th>
+                                <th class="px-4 py-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="items-table-body" class="divide-y">
+                            <!-- Items will be rendered here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="view-settings" class="tab-view hidden">
+            <div class="bg-white p-6 rounded-lg shadow-sm border">
+                <h2 class="text-lg font-bold mb-4">Extension Settings</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Connection Status</label>
+                        <div id="settings-status" class="mt-1 p-2 bg-gray-100 rounded text-sm font-mono">
+                            Waiting for Manager.io...
+                        </div>
+                    </div>
+                    <div class="pt-4 border-t">
+                        <button onclick="exportData()" class="text-blue-600 hover:underline text-sm">Export Configuration (JSON)</button>
+                        <span class="mx-2 text-gray-300">|</span>
+                        <button onclick="importData()" class="text-blue-600 hover:underline text-sm">Import Configuration</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Set Dual Unit Modal -->
+    <div id="modal-set-dual" class="modal flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
+            <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                <h3 class="font-bold">Set Dual Unit</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">&times;</button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div id="modal-item-name" class="text-sm font-bold text-blue-600 mb-2">Item Name</div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Primary Unit</label>
+                        <input type="text" id="ef-unit1" class="w-full p-2 border rounded" placeholder="e.g. Box">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Secondary Unit</label>
+                        <input type="text" id="ef-unit2" class="w-full p-2 border rounded" placeholder="e.g. Metre">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Ratio (1 Unit 1 = ? Unit 2)</label>
+                    <input type="number" id="ef-ratio" class="w-full p-2 border rounded" placeholder="e.g. 1.2">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Price / Unit 1</label>
+                        <input type="number" id="ef-price1" class="w-full p-2 border rounded" placeholder="0.00">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Price / Unit 2</label>
+                        <input type="number" id="ef-price2" class="w-full p-2 border rounded" placeholder="0.00">
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t flex justify-end space-x-3">
+                <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button onclick="saveDualUnit()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let inventoryItems = [];
+        let dualUnitConfigs = JSON.parse(localStorage.getItem('dualUnitConfigs') || '{}');
+        let currentEditingItemId = null;
+        let managerContext = null;
+
+        // --- Manager.io API Bridge ---
+        function postMessageWithResponse(message) {
+            return new Promise((resolve, reject) => {
+                const requestId = crypto.randomUUID();
+                const timer = setTimeout(() => {
+                    window.removeEventListener('message', handler);
+                    reject(new Error('Timeout — is this running inside Manager.io?'));
+                }, 15000);
+                function handler(event) {
+                    if (event.data?.type?.endsWith('-response') && event.data?.requestId === requestId) {
+                        clearTimeout(timer);
+                        window.removeEventListener('message', handler);
+                        resolve(event.data.body);
+                    }
+                }
+                window.addEventListener('message', handler);
+                window.parent.postMessage({ ...message, requestId }, '*');
+            });
+        }
+
+        async function fetchAll(endpoint) {
+            const allItems = [];
+            let nextToken = null;
+            do {
+                const path = nextToken
+                    ? `/api4/${endpoint}?PageSize=1000&next_page_token=` + encodeURIComponent(nextToken)
+                    : `/api4/${endpoint}?PageSize=1000`;
+                const data = await postMessageWithResponse({ type: 'api-request', method: 'GET', path });
+                const page = Array.isArray(data) ? data : (data.items || data.data || []);
+                allItems.push(...page);
+                nextToken = data.next_page_token || data.nextPageToken || null;
+            } while (nextToken);
+            return allItems;
+        }
+
+        // --- UI Logic ---
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-view').forEach(v => v.classList.add('hidden'));
+            document.getElementById('view-' + tabId).classList.remove('hidden');
+            document.querySelectorAll('[id^="tab-"]').forEach(t => {
+                t.classList.remove('tab-active', 'text-blue-600');
+                t.classList.add('text-gray-500');
+            });
+            document.getElementById('tab-' + tabId).classList.add('tab-active', 'text-blue-600');
+            document.getElementById('tab-' + tabId).classList.remove('text-gray-500');
+        }
+
+        function renderItems() {
+            const tbody = document.getElementById('items-table-body');
+            const search = document.getElementById('item-search').value.toLowerCase();
+            tbody.innerHTML = '';
+            
+            inventoryItems.filter(item => 
+                item.Name.toLowerCase().includes(search) || 
+                (item.Code && item.Code.toLowerCase().includes(search))
+            ).forEach(item => {
+                const config = dualUnitConfigs[item.Key];
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-4 py-3 font-medium">${item.Name}</td>
+                    <td class="px-4 py-3 text-gray-500">${item.Code || '—'}</td>
+                    <td class="px-4 py-3">
+                        ${config ? `<span class="text-green-600 text-xs font-bold">✓ SET (${config.unit1}/${config.unit2})</span>` : '<span class="text-gray-400 text-xs">NOT SET</span>'}
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        <button onclick="openSetDualModal('${item.Key}')" class="text-blue-600 hover:underline text-sm font-medium">Set Dual</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function openSetDualModal(itemId) {
+            const item = inventoryItems.find(i => i.Key === itemId);
+            currentEditingItemId = itemId;
+            document.getElementById('modal-item-name').textContent = item.Name;
+            const config = dualUnitConfigs[itemId] || { unit1: 'Box', unit2: 'Metre', ratio: '', price1: '', price2: '' };
+            document.getElementById('ef-unit1').value = config.unit1;
+            document.getElementById('ef-unit2').value = config.unit2;
+            document.getElementById('ef-ratio').value = config.ratio;
+            document.getElementById('ef-price1').value = config.price1;
+            document.getElementById('ef-price2').value = config.price2;
+            document.getElementById('modal-set-dual').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('modal-set-dual').style.display = 'none';
+        }
+
+        function saveDualUnit() {
+            const config = {
+                unit1: document.getElementById('ef-unit1').value,
+                unit2: document.getElementById('ef-unit2').value,
+                ratio: parseFloat(document.getElementById('ef-ratio').value),
+                price1: parseFloat(document.getElementById('ef-price1').value),
+                price2: parseFloat(document.getElementById('ef-price2').value)
+            };
+            dualUnitConfigs[currentEditingItemId] = config;
+            localStorage.setItem('dualUnitConfigs', JSON.stringify(dualUnitConfigs));
+            closeModal();
+            renderItems();
+            updateItemSelect();
+        }
+
+        function updateItemSelect() {
+            const select = document.getElementById('calc-item-select');
+            const currentVal = select.value;
+            select.innerHTML = '<option value="">— Select an inventory item —</option>';
+            inventoryItems.forEach(item => {
+                if (dualUnitConfigs[item.Key]) {
+                    const opt = document.createElement('option');
+                    opt.value = item.Key;
+                    opt.textContent = item.Name + (item.Code ? ` (${item.Code})` : '');
+                    select.appendChild(opt);
+                }
+            });
+            select.value = currentVal;
+        }
+
+        function onItemSelect() {
+            const itemId = document.getElementById('calc-item-select').value;
+            if (!itemId) {
+                document.getElementById('calc-controls').classList.add('hidden');
+                document.getElementById('calc-placeholder').classList.remove('hidden');
+                return;
+            }
+            const config = dualUnitConfigs[itemId];
+            document.getElementById('label-unit1').textContent = config.unit1;
+            document.getElementById('label-unit2').textContent = config.unit2;
+            document.getElementById('price-unit1').textContent = `Price: ${config.price1.toFixed(2)}`;
+            document.getElementById('price-unit2').textContent = `Price: ${config.price2.toFixed(2)}`;
+            document.getElementById('input-unit1').value = '';
+            document.getElementById('input-unit2').value = '';
+            document.getElementById('calc-total').textContent = '0.00';
+            document.getElementById('calc-controls').classList.remove('hidden');
+            document.getElementById('calc-placeholder').classList.add('hidden');
+        }
+
+        function convert(sourceUnit) {
+            const itemId = document.getElementById('calc-item-select').value;
+            const config = dualUnitConfigs[itemId];
+            const val1 = document.getElementById('input-unit1');
+            const val2 = document.getElementById('input-unit2');
+            
+            if (sourceUnit === 1) {
+                const v = parseFloat(val1.value);
+                if (!isNaN(v)) {
+                    val2.value = (v * config.ratio).toFixed(4);
+                    document.getElementById('calc-total').textContent = (v * config.price1).toFixed(2);
+                }
+            } else {
+                const v = parseFloat(val2.value);
+                if (!isNaN(v)) {
+                    val1.value = (v / config.ratio).toFixed(4);
+                    document.getElementById('calc-total').textContent = (v * config.price2).toFixed(2);
+                }
+            }
+        }
+
+        async function insertToInvoice() {
+            const itemId = document.getElementById('calc-item-select').value;
+            const config = dualUnitConfigs[itemId];
+            const qty = parseFloat(document.getElementById('input-unit1').value);
+            const price = config.price1;
+            
+            if (isNaN(qty) || qty <= 0) {
+                alert('Please enter a valid quantity.');
+                return;
+            }
+
+            try {
+                // 1. Get current page context
+                const page = await postMessageWithResponse({ type: 'page-request' });
+                if (!page || (page.handler !== 'SalesInvoiceView' && page.handler !== 'SalesInvoiceEdit')) {
+                    alert('Please open a Sales Invoice in Manager.io to use this feature.');
+                    return;
+                }
+
+                const invoiceKey = page.query.key;
+                // 2. Fetch current invoice data
+                const invoice = await postMessageWithResponse({ 
+                    type: 'api-request', 
+                    method: 'GET', 
+                    path: `/api4/sales-invoices/${invoiceKey}` 
+                });
+
+                // 3. Add new line
+                const newLine = {
+                    InventoryItem: itemId,
+                    Qty: qty,
+                    UnitPrice: price,
+                    Description: `${qty} ${config.unit1} (${document.getElementById('input-unit2').value} ${config.unit2})`
+                };
+                
+                if (!invoice.Lines) invoice.Lines = [];
+                invoice.Lines.push(newLine);
+
+                // 4. Update invoice
+                await postMessageWithResponse({
+                    type: 'api-request',
+                    method: 'PUT',
+                    path: `/api4/sales-invoices/${invoiceKey}`,
+                    body: invoice
+                });
+
+                alert('Line inserted successfully! Refresh the invoice page to see changes.');
+            } catch (err) {
+                alert('Error inserting line: ' + err.message);
+            }
+        }
+
+        function exportData() {
+            const data = JSON.stringify(dualUnitConfigs, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'manager-dual-units-config.json';
+            a.click();
+        }
+
+        function importData() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = e => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = readerEvent => {
+                    try {
+                        const content = JSON.parse(readerEvent.target.result);
+                        dualUnitConfigs = content;
+                        localStorage.setItem('dualUnitConfigs', JSON.stringify(dualUnitConfigs));
+                        renderItems();
+                        updateItemSelect();
+                        alert('Configuration imported successfully!');
+                    } catch (err) {
+                        alert('Error importing data: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+        // --- Demo Mode ---
+        function loadDemoData() {
+            inventoryItems = [
+                { Key: 'demo-1', Name: '60x60 Tiles', Code: 'T-6060' },
+                { Key: 'demo-2', Name: 'Marble Slab', Code: 'M-001' },
+                { Key: 'demo-3', Name: 'Paint (5L Tin)', Code: 'P-5L' }
+            ];
+            if (Object.keys(dualUnitConfigs).length === 0) {
+                dualUnitConfigs['demo-1'] = { unit1: 'Box', unit2: 'Metre', ratio: 1.44, price1: 144.00, price2: 100.00 };
+                dualUnitConfigs['demo-2'] = { unit1: 'Slab', unit2: 'SqFt', ratio: 45.5, price1: 4550.00, price2: 100.00 };
+            }
+            renderItems();
+            updateItemSelect();
+            
+            const statusEl = document.getElementById('connection-status');
+            statusEl.innerHTML = '<span class="w-2 h-2 bg-blue-500 rounded-full mr-2"></span> Demo Mode (No Manager.io connection)';
+            statusEl.classList.remove('text-yellow-600');
+            statusEl.classList.add('text-blue-600');
+            document.getElementById('settings-status').textContent = 'Running in Demo Mode. Connect to Manager.io to see live data.';
+        }
+
+        // --- Initialization ---
+        async function init() {
+            // Set a timeout for the connection
+            const connectionTimeout = setTimeout(() => {
+                if (inventoryItems.length === 0) {
+                    console.log('Connection timed out, loading demo data...');
+                    loadDemoData();
+                }
+            }, 3000);
+
+            try {
+                // Check if running inside Manager.io
+                window.parent.postMessage({ type: 'resize', height: 600 }, '*');
+                
+                const statusEl = document.getElementById('connection-status');
+                const settingsStatusEl = document.getElementById('settings-status');
+                
+                // Fetch inventory items
+                inventoryItems = await fetchAll('inventory-items');
+                clearTimeout(connectionTimeout);
+                
+                statusEl.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span> Connected to Manager.io';
+                statusEl.classList.remove('text-yellow-600');
+                statusEl.classList.add('text-green-600');
+                settingsStatusEl.textContent = 'Connected to Manager.io API';
+                
+                renderItems();
+                updateItemSelect();
+            } catch (err) {
+                console.error('Connection failed:', err);
+                // If we haven't loaded data yet, load demo data
+                if (inventoryItems.length === 0) {
+                    loadDemoData();
+                }
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
