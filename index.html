@@ -8,7 +8,7 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 50; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
@@ -82,7 +82,10 @@
             <div class="bg-white rounded-lg shadow-sm border overflow-hidden">
                 <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
                     <h2 class="font-bold">Inventory Items</h2>
-                    <input type="text" id="item-search" placeholder="Search items..." class="p-1 border rounded text-sm" oninput="renderItems()">
+                    <div class="flex space-x-2">
+                        <input type="text" id="item-search" placeholder="Search items..." class="p-1 border rounded text-sm" oninput="renderItems()">
+                        <button onclick="init()" class="text-xs bg-gray-200 px-2 py-1 rounded hover:bg-gray-300">Refresh List</button>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left">
@@ -117,6 +120,8 @@
                         <button onclick="exportData()" class="text-blue-600 hover:underline text-sm">Export Configuration (JSON)</button>
                         <span class="mx-2 text-gray-300">|</span>
                         <button onclick="importData()" class="text-blue-600 hover:underline text-sm">Import Configuration</button>
+                        <span class="mx-2 text-gray-300">|</span>
+                        <button onclick="clearAllData()" class="text-red-600 hover:underline text-sm">Clear All Data</button>
                     </div>
                 </div>
             </div>
@@ -128,7 +133,7 @@
         <div class="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
             <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
                 <h3 class="font-bold">Set Dual Unit</h3>
-                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">&times;</button>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
             </div>
             <div class="p-6 space-y-4">
                 <div id="modal-item-name" class="text-sm font-bold text-blue-600 mb-2">Item Name</div>
@@ -144,16 +149,16 @@
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Ratio (1 Unit 1 = ? Unit 2)</label>
-                    <input type="number" id="ef-ratio" class="w-full p-2 border rounded" placeholder="e.g. 1.2">
+                    <input type="number" id="ef-ratio" class="w-full p-2 border rounded" placeholder="e.g. 1.2" step="any">
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Price / Unit 1</label>
-                        <input type="number" id="ef-price1" class="w-full p-2 border rounded" placeholder="0.00">
+                        <input type="number" id="ef-price1" class="w-full p-2 border rounded" placeholder="0.00" step="any">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Price / Unit 2</label>
-                        <input type="number" id="ef-price2" class="w-full p-2 border rounded" placeholder="0.00">
+                        <input type="number" id="ef-price2" class="w-full p-2 border rounded" placeholder="0.00" step="any">
                     </div>
                 </div>
             </div>
@@ -169,7 +174,6 @@
         let inventoryItems = [];
         let dualUnitConfigs = JSON.parse(localStorage.getItem('dualUnitConfigs') || '{}');
         let currentEditingItemId = null;
-        let managerContext = null;
 
         // --- Manager.io API Bridge ---
         function postMessageWithResponse(message) {
@@ -178,7 +182,7 @@
                 const timer = setTimeout(() => {
                     window.removeEventListener('message', handler);
                     reject(new Error('Timeout — is this running inside Manager.io?'));
-                }, 15000);
+                }, 10000);
                 function handler(event) {
                     if (event.data?.type?.endsWith('-response') && event.data?.requestId === requestId) {
                         clearTimeout(timer);
@@ -194,14 +198,20 @@
         async function fetchAll(endpoint) {
             const allItems = [];
             let nextToken = null;
+            let pageCount = 0;
             do {
                 const path = nextToken
                     ? `/api4/${endpoint}?PageSize=1000&next_page_token=` + encodeURIComponent(nextToken)
                     : `/api4/${endpoint}?PageSize=1000`;
+                
                 const data = await postMessageWithResponse({ type: 'api-request', method: 'GET', path });
+                if (!data) break;
+                
                 const page = Array.isArray(data) ? data : (data.items || data.data || []);
                 allItems.push(...page);
                 nextToken = data.next_page_token || data.nextPageToken || null;
+                pageCount++;
+                if (pageCount > 50) break; // Safety break
             } while (nextToken);
             return allItems;
         }
@@ -223,14 +233,21 @@
             const search = document.getElementById('item-search').value.toLowerCase();
             tbody.innerHTML = '';
             
-            inventoryItems.filter(item => 
-                item.Name.toLowerCase().includes(search) || 
+            const filtered = inventoryItems.filter(item => 
+                (item.Name && item.Name.toLowerCase().includes(search)) || 
                 (item.Code && item.Code.toLowerCase().includes(search))
-            ).forEach(item => {
+            );
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">No items found.</td></tr>';
+                return;
+            }
+
+            filtered.forEach(item => {
                 const config = dualUnitConfigs[item.Key];
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td class="px-4 py-3 font-medium">${item.Name}</td>
+                    <td class="px-4 py-3 font-medium">${item.Name || 'Unnamed Item'}</td>
                     <td class="px-4 py-3 text-gray-500">${item.Code || '—'}</td>
                     <td class="px-4 py-3">
                         ${config ? `<span class="text-green-600 text-xs font-bold">✓ SET (${config.unit1}/${config.unit2})</span>` : '<span class="text-gray-400 text-xs">NOT SET</span>'}
@@ -245,6 +262,7 @@
 
         function openSetDualModal(itemId) {
             const item = inventoryItems.find(i => i.Key === itemId);
+            if (!item) return;
             currentEditingItemId = itemId;
             document.getElementById('modal-item-name').textContent = item.Name;
             const config = dualUnitConfigs[itemId] || { unit1: 'Box', unit2: 'Metre', ratio: '', price1: '', price2: '' };
@@ -261,13 +279,23 @@
         }
 
         function saveDualUnit() {
+            const unit1 = document.getElementById('ef-unit1').value;
+            const unit2 = document.getElementById('ef-unit2').value;
+            const ratio = parseFloat(document.getElementById('ef-ratio').value);
+            const price1 = parseFloat(document.getElementById('ef-price1').value);
+            const price2 = parseFloat(document.getElementById('ef-price2').value);
+
+            if (!unit1 || !unit2 || isNaN(ratio)) {
+                alert('Please fill in units and ratio.');
+                return;
+            }
+
             const config = {
-                unit1: document.getElementById('ef-unit1').value,
-                unit2: document.getElementById('ef-unit2').value,
-                ratio: parseFloat(document.getElementById('ef-ratio').value),
-                price1: parseFloat(document.getElementById('ef-price1').value),
-                price2: parseFloat(document.getElementById('ef-price2').value)
+                unit1, unit2, ratio,
+                price1: isNaN(price1) ? 0 : price1,
+                price2: isNaN(price2) ? 0 : price2
             };
+            
             dualUnitConfigs[currentEditingItemId] = config;
             localStorage.setItem('dualUnitConfigs', JSON.stringify(dualUnitConfigs));
             closeModal();
@@ -283,11 +311,11 @@
                 if (dualUnitConfigs[item.Key]) {
                     const opt = document.createElement('option');
                     opt.value = item.Key;
-                    opt.textContent = item.Name + (item.Code ? ` (${item.Code})` : '');
+                    opt.textContent = (item.Name || 'Unnamed') + (item.Code ? ` (${item.Code})` : '');
                     select.appendChild(opt);
                 }
             });
-            select.value = currentVal;
+            if (dualUnitConfigs[currentVal]) select.value = currentVal;
         }
 
         function onItemSelect() {
@@ -320,12 +348,18 @@
                 if (!isNaN(v)) {
                     val2.value = (v * config.ratio).toFixed(4);
                     document.getElementById('calc-total').textContent = (v * config.price1).toFixed(2);
+                } else {
+                    val2.value = '';
+                    document.getElementById('calc-total').textContent = '0.00';
                 }
             } else {
                 const v = parseFloat(val2.value);
                 if (!isNaN(v)) {
                     val1.value = (v / config.ratio).toFixed(4);
                     document.getElementById('calc-total').textContent = (v * config.price2).toFixed(2);
+                } else {
+                    val1.value = '';
+                    document.getElementById('calc-total').textContent = '0.00';
                 }
             }
         }
@@ -342,7 +376,6 @@
             }
 
             try {
-                // 1. Get current page context
                 const page = await postMessageWithResponse({ type: 'page-request' });
                 if (!page || (page.handler !== 'SalesInvoiceView' && page.handler !== 'SalesInvoiceEdit')) {
                     alert('Please open a Sales Invoice in Manager.io to use this feature.');
@@ -350,14 +383,12 @@
                 }
 
                 const invoiceKey = page.query.key;
-                // 2. Fetch current invoice data
                 const invoice = await postMessageWithResponse({ 
                     type: 'api-request', 
                     method: 'GET', 
                     path: `/api4/sales-invoices/${invoiceKey}` 
                 });
 
-                // 3. Add new line
                 const newLine = {
                     InventoryItem: itemId,
                     Qty: qty,
@@ -368,7 +399,6 @@
                 if (!invoice.Lines) invoice.Lines = [];
                 invoice.Lines.push(newLine);
 
-                // 4. Update invoice
                 await postMessageWithResponse({
                     type: 'api-request',
                     method: 'PUT',
@@ -378,7 +408,7 @@
 
                 alert('Line inserted successfully! Refresh the invoice page to see changes.');
             } catch (err) {
-                alert('Error inserting line: ' + err.message);
+                alert('Error: ' + err.message);
             }
         }
 
@@ -416,6 +446,15 @@
             input.click();
         }
 
+        function clearAllData() {
+            if (confirm('Are you sure you want to clear all dual unit configurations?')) {
+                dualUnitConfigs = {};
+                localStorage.removeItem('dualUnitConfigs');
+                renderItems();
+                updateItemSelect();
+            }
+        }
+
         // --- Demo Mode ---
         function loadDemoData() {
             inventoryItems = [
@@ -439,38 +478,31 @@
 
         // --- Initialization ---
         async function init() {
-            // Set a timeout for the connection
-            const connectionTimeout = setTimeout(() => {
-                if (inventoryItems.length === 0) {
-                    console.log('Connection timed out, loading demo data...');
-                    loadDemoData();
-                }
-            }, 3000);
+            const statusEl = document.getElementById('connection-status');
+            const settingsStatusEl = document.getElementById('settings-status');
+            
+            statusEl.innerHTML = '<span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span> Connecting...';
+            statusEl.className = 'text-sm text-yellow-600 flex items-center';
 
             try {
-                // Check if running inside Manager.io
+                // Try to resize first
                 window.parent.postMessage({ type: 'resize', height: 600 }, '*');
-                
-                const statusEl = document.getElementById('connection-status');
-                const settingsStatusEl = document.getElementById('settings-status');
                 
                 // Fetch inventory items
                 inventoryItems = await fetchAll('inventory-items');
-                clearTimeout(connectionTimeout);
                 
-                statusEl.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span> Connected to Manager.io';
-                statusEl.classList.remove('text-yellow-600');
-                statusEl.classList.add('text-green-600');
-                settingsStatusEl.textContent = 'Connected to Manager.io API';
-                
-                renderItems();
-                updateItemSelect();
+                if (inventoryItems && inventoryItems.length > 0) {
+                    statusEl.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span> Connected to Manager.io';
+                    statusEl.className = 'text-sm text-green-600 flex items-center';
+                    settingsStatusEl.textContent = 'Connected to Manager.io API. Found ' + inventoryItems.length + ' items.';
+                    renderItems();
+                    updateItemSelect();
+                } else {
+                    throw new Error('No items found');
+                }
             } catch (err) {
                 console.error('Connection failed:', err);
-                // If we haven't loaded data yet, load demo data
-                if (inventoryItems.length === 0) {
-                    loadDemoData();
-                }
+                loadDemoData();
             }
         }
 
